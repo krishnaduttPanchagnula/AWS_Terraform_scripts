@@ -134,14 +134,68 @@ resource "aws_iam_role" "iam_for_alleventmonitoring" {
     }
   )
 
-  managed_policy_arns   = [
-      "arn:aws:iam::498830417177:policy/service-role/AWSLambdaBasicExecutionRole-fdd9e8dc-0088-48c9-9410-fedae7e0a2fc",
-      "arn:aws:iam::498830417177:policy/service-role/AWSLambdaSNSPublishPolicyExecutionRole-abf3e375-1631-404e-8b14-10608f8ec702",
-      "arn:aws:iam::498830417177:policy/service-role/AWSLambdaSNSTopicDestinationExecutionRole-296e6d79-31ab-433c-8f1c-872501462d1c",
-  ]
+  managed_policy_arns   = [aws_iam_policy.AWSLambdaBasicExecutionRole.arn, aws_iam_policy.AWSLambdaSNSPublishPolicyExecutionRole.arn,aws_iam_policy.AWSLambdaSNSTopicDestinationExecutionRole.arn]
 
   inline_policy {}
 }
+
+resource "aws_iam_policy" "AWSLambdaBasicExecutionRole" {
+  name = "AWSLambdaBasicExecutionRole-alleventmonitoring_lambda"
+
+  policy = jsonencode({
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": "logs:CreateLogGroup",
+            "Resource": "*"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+            ],
+            "Resource": [
+                "*"
+            ]
+        }
+    ]
+})
+}
+
+resource "aws_iam_policy" "AWSLambdaSNSPublishPolicyExecutionRole" {
+  name = "AWSLambdaSNSPublishPolicyExecutionRole-alleventmonitoring_lambda"
+
+  policy = jsonencode({
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "sns:Publish"
+            ],
+            "Resource": "arn:aws:sns:*:*:*"
+        }
+    ]
+})
+}
+
+resource "aws_iam_policy" "AWSLambdaSNSTopicDestinationExecutionRole" {
+  name = "AWSLambdaSNSTopicDestinationExecutionRole-alleventmonitoring_lambda"
+
+  policy = jsonencode({
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": "sns:Publish",
+            "Resource": aws_sns_topic.alleventsns.arn
+        }
+    ]
+})
+}
+
 
 data "archive_file" "Resource_monitoring_lambdascript" {
   type        = "zip"
