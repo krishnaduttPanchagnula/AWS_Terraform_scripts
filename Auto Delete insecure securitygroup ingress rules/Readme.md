@@ -226,4 +226,4 @@ resource "aws_sns_topic_subscription" "sg_emailsubscription" {
 }
 ```
 
-For entire python code along with terraform code, please refer the following Github repo. To replicate this system in your environment, change the base security rules that you want to monitor for in python and type *terraform apply* in the terminal. Sit back and have a cup of coffee, while the terraform builds this system in your AWS account.
+To replicate this system in your environment, change the base security rules that you want to monitor for in python and type *terraform apply* in the terminal. Sit back and have a cup of coffee, while the terraform builds this system in your AWS account.
