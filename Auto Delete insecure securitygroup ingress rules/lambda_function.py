@@ -51,8 +51,8 @@ def lambda_handler(event, context):
             #and pass it as env variables to the lambda function
             sns = boto3.client('sns')
             sns.publish(TopicArn= os.environ['SNSARN'],Message=y,Subject='Insecure Ingress ACL entry')
-    except Exception as e:
-        print(e)
+    except KeyError as e:
+        print("This SG passes the Lambda Security Group Filter")
     
     
 
