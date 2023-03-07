@@ -123,55 +123,69 @@ resource "aws_cloudwatch_event_target" "example" {
 1. These filtered api events are sent to the lambda, which will check for the port, protocol and traffic we have previously configured in the python code( In this example, i am checking for wildcard IP - which is entire internet, all the ports on ingress rule. You can also filter with with the protocol that you dont want to allow. Refer the code for details)
 
 ```python
+import os
 import boto3
 
-def lambda_handler(event:dict):
+def lambda_handler(event, context):
     print("Checking if the created NetworkACL has an insecure ingress ACL entry: 0.0.0.0/0, rule action: allow, port range -1 and Ingress ACL entry")
 
-    cidr_block = event['detail']['requestParameters']['ipPermissions']['items'][0]['ipRanges']['items'][0]['cidrIp']
-    is_engress = event['detail']['responseElements']['securityGroupRuleSet']["items"][0]['isEgress']
-    from_port = event['detail']['responseElements']['securityGroupRuleSet']["items"][0]['fromPort']
+
+    try:
+
+        cidr_block = event['detail']['requestParameters']['ipPermissions']['items'][0]['ipRanges']['items'][0]['cidrIp']
+        
+        is_engress = event['detail']['responseElements']['securityGroupRuleSet']["items"][0]['isEgress']
+        from_port = event['detail']['responseElements']['securityGroupRuleSet']["items"][0]['fromPort']
+        to_port = event['detail']['responseElements']['securityGroupRuleSet']["items"][0]['toPort']
+        
+        #! if you want to filter with protocol use this argument in the below if statement.
+        # protocol   = event['detail']['responseElements']['securityGroupRuleSet']["items"][0]['ipProtocol']
+
+
+        if (cidr_block == "0.0.0.0/0" and is_engress == False and (from_port == -1 or (from_port == 0 and to_port == 65535))):
+            
+
+            #Getting NetworkACL ID from the event.
+            iam = event['detail']['userIdentity']['arn']
+            sg_group_id = event['detail']['requestParameters']['groupId']
+
+            
+            #getting Rule number to be deleted.
+            RuleNumberACLEntry = event['detail']['responseElements']['securityGroupRuleSet']["items"][0]['securityGroupRuleId']
+            #Deleting the insecure Ingress Network ACL entry.
+            client = boto3.client('ec2')        
+            response = client.revoke_security_group_ingress(GroupId=sg_group_id,IpPermissions=[
+                {
+                    'IpProtocol': '-1',
+                    'ToPort': -1,
+                    'IpRanges': [{'CidrIp': cidr_block}]
+                }
+            ])
+            
+            print(response)
+
+            y= """The Security group of id {sg_name} has a new 
+            secrurity rule of id {sg_rule_name} is 
+            created by Iam role of {iam_role} and 
+            has been deleted""".format(sg_name=sg_group_id,sg_rule_name=RuleNumberACLEntry,iam_role=iam)
+
+            print(y)
+
+
+            #If you want to send an email to the end user, create a sns before hand via terraform 
+            #and pass it as env variables to the lambda function
+            sns = boto3.client('sns')
+            sns.publish(TopicArn= os.environ['SNSARN'],Message=y,Subject='Insecure Ingress ACL entry')
+    except KeyError as e:
+        print("This SG passes the Lambda Security Group Filter")
     
-    #! if you want to filter with protocol use thois argument in the below if statement.
-    # protocol   = event['detail']['responseElements']['securityGroupRuleSet']["items"][0]['ipProtocol']
+    
 
-    if ((cidr_block == "0.0.0.0/0") and (is_engress == False) and (from_port == -1)):
+   
 
-        #Getting NetworkACL ID from the event.
-        iam = event['detail']['userIdentity']['arn']
-        sg_group_id = event['detail']['requestParameters']['groupId']
-
-        
-        #getting Rule number to be deleted.
-        RuleNumberACLEntry = event['detail']['responseElements']['securityGroupRuleSet']["items"][0]['securityGroupRuleId']
-
-        #Deleting the insecure Ingress Network ACL entry.
-        # client = boto3.client('ec2')        
-        # response = client.revoke_security_group_ingress(GroupId=sg_group_id,IpPermissions=[
-        #     {
-        #         'IpProtocol': '-1',
-        #         'ToPort': -1,
-        #         'IpRanges': [{'CidrIp': cidr_block}]
-        #     }
-        # ])
-        
-        # print(response)
-
-        y = """The Security group of id {sg_name} has a new 
-        secrurity rule of id {sg_rule_name} is 
-        created by Iam role of {iam_role} and 
-        has been deleted {cidr}""".format(cidr=cidr_block,sg_name=sg_group_id,sg_rule_name=RuleNumberACLEntry,iam_role=iam)
-
-        print(y)
-
-        # If you want to send an email to the end user, create a sns before hand via terraform 
-        # and pass it as env variables to the lambda function
-        sns = boto3.client('sns')
-        sns.publish(TopicArn='string',Message=y,Subject='Insecure Ingress ACL entry',
-         MessageStructure='string')
 ```
 
-1. This python code will filter all the security groups and find the security group rules, which violate them and delete them. 
+1. The python code will filter all the security groups and find the security group rules, which violate them and delete them. 
 2. Once these are deleted, SNS is used to send email event details such as arn of security group rule, the **role arn of the person** creating this rule, the violations that the rule group has done in reference to baseline security compliance. This email altering can help us to understand the actors causing these deviations and give proper training on the security compliance.
 
 ```python
