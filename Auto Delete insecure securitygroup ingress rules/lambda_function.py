@@ -1,3 +1,4 @@
+import os
 import boto3
 
 def lambda_handler(event, context):
@@ -7,12 +8,13 @@ def lambda_handler(event, context):
     
     is_engress = event['detail']['responseElements']['securityGroupRuleSet']["items"][0]['isEgress']
     from_port = event['detail']['responseElements']['securityGroupRuleSet']["items"][0]['fromPort']
+    to_port = event['detail']['responseElements']['securityGroupRuleSet']["items"][0]['toPort']
     
     #! if you want to filter with protocol use this argument in the below if statement.
     # protocol   = event['detail']['responseElements']['securityGroupRuleSet']["items"][0]['ipProtocol']
 
 
-    if ((cidr_block == "0.0.0.0/0") and (is_engress == False) and (from_port == -1)):
+    if (cidr_block == "0.0.0.0/0" and is_engress == False and (from_port == -1 or (from_port == 0 and to_port == 65535))):
         
 
         #Getting NetworkACL ID from the event.
@@ -45,7 +47,6 @@ def lambda_handler(event, context):
         #If you want to send an email to the end user, create a sns before hand via terraform 
         #and pass it as env variables to the lambda function
         sns = boto3.client('sns')
-        sns.publish(TopicArn='string',Message=y,Subject='Insecure Ingress ACL entry',
-        MessageStructure='string')
+        sns.publish(TopicArn= os.environ['SNSARN'],Message=y,Subject='Insecure Ingress ACL entry')
 
    

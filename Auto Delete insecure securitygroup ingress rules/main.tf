@@ -14,6 +14,14 @@ resource "aws_s3_bucket" "cloudtraillogs" {
   bucket        = var.trailbucketname
   force_destroy = true
 }
+resource "aws_s3_bucket_public_access_block" "example" {
+  bucket = aws_s3_bucket.cloudtraillogs.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
 
 resource "aws_s3_bucket_policy" "aws_sg" {
   bucket = aws_s3_bucket.cloudtraillogs.id
@@ -22,25 +30,29 @@ resource "aws_s3_bucket_policy" "aws_sg" {
     "Version": "2012-10-17",
     "Statement": [
         {
-            "Sid": "AWSCloudTrailAclCheck",
+            "Sid": "AWSCloudTrailAclCheck20150319",
             "Effect": "Allow",
             "Principal": {
-              "Service": "cloudtrail.amazonaws.com"
+                "Service": "cloudtrail.amazonaws.com"
             },
             "Action": "s3:GetBucketAcl",
-            "Resource": "${aws_s3_bucket.cloudtraillogs.arn}"
-        },
-        {
-            "Sid": "AWSCloudTrailWrite",
-            "Effect": "Allow",
-            "Principal": {
-              "Service": "cloudtrail.amazonaws.com"
-            },
-            "Action": "s3:PutObject",
-            "Resource": "${aws_s3_bucket.cloudtraillogs.arn}/prefix/AWSLogs/${data.aws_caller_identity.current.account_id}/*",
+            "Resource": "${aws_s3_bucket.cloudtraillogs.arn}",
             "Condition": {
                 "StringEquals": {
-                    "s3:x-amz-acl": "bucket-owner-full-control"
+                    "AWS:SourceArn": "arn:aws:cloudtrail:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:trail/${var.cloudtrailname}"
+                }
+            }
+        },
+        {
+            "Sid": "AWSCloudTrailWrite20150319",
+            "Effect": "Allow",
+            "Principal": {"Service": "cloudtrail.amazonaws.com"},
+            "Action": "s3:PutObject",
+            "Resource": "arn:aws:s3:::${var.trailbucketname}/prefix/AWSLogs/${data.aws_caller_identity.current.account_id}/*",
+            "Condition": {
+                "StringEquals": {
+                    "s3:x-amz-acl": "bucket-owner-full-control",
+                    "AWS:SourceArn": "arn:aws:cloudtrail:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:trail/${var.cloudtrailname}"
                 }
             }
         }
@@ -78,50 +90,55 @@ resource "aws_cloudwatch_event_target" "example" {
 // SNS 
 resource "aws_sns_topic" "aws_sg_sns" {
   name   = var.snstopicname
-  policy = <<EOT
-{
-  "Version": "2008-10-17",
-  "Id": "__default_policy_ID",
-  "Statement": [
-    {
-      "Sid": "__default_statement_ID",
-      "Effect": "Allow",
-      "Principal": {
-        "AWS": "*"
-      },
-      "Action": [
-        "SNS:GetTopicAttributes",
-        "SNS:SetTopicAttributes",
-        "SNS:AddPermission",
-        "SNS:RemovePermission",
-        "SNS:DeleteTopic",
-        "SNS:Subscribe",
-        "SNS:ListSubscriptionsByTopic",
-        "SNS:Publish"
-      ],
-      "Resource": "${aws_sns_topic.aws_sg_sns.arn}",
-      "Condition": {
-        "StringEquals": {
-          "AWS:SourceOwner": "${data.aws_caller_identity.current.account_id}"
-        }
-      }
-    },
-    {
-      "Sid": "AWSEvents_aws_SG",
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "events.amazonaws.com"
-      },
-      "Action": "sns:Publish",
-      "Resource": "${aws_sns_topic.aws_sg_sns.arn}"
-    }
-  ]
 }
-EOT
+resource "aws_sns_topic_policy" "default"{
+  arn = aws_sns_topic.aws_sg_sns.arn
+  policy = data.aws_iam_policy_document.sns_topic_policy.json
 }
 
+data "aws_iam_policy_document" "sns_topic_policy" {
+  policy_id = "__default_policy_ID"
+
+  statement {
+    actions = [
+      "SNS:Subscribe",
+      "SNS:SetTopicAttributes",
+      "SNS:RemovePermission",
+      "SNS:Receive",
+      "SNS:Publish",
+      "SNS:ListSubscriptionsByTopic",
+      "SNS:GetTopicAttributes",
+      "SNS:DeleteTopic",
+      "SNS:AddPermission",
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "AWS:SourceOwner"
+
+      values = [
+        data.aws_caller_identity.current.account_id,
+      ]
+    }
+
+    effect = "Allow"
+
+    principals {
+      type        = "AWS"
+      identifiers = ["*"]
+    }
+
+    resources = [
+      aws_sns_topic.aws_sg_sns.arn,
+    ]
+
+    sid = "__default_statement_ID"
+  }
+}
+
+
 resource "aws_sns_topic_subscription" "sg_emailsubscription" {
-  topic_arn = aws_sns_topic.aws_sg_sns
+  topic_arn = aws_sns_topic.aws_sg_sns.arn
   protocol  = "email"
   endpoint  = var.email
 }
@@ -143,7 +160,7 @@ data "archive_file" "SG_monitoring_lambdascript" {
 }
 
 resource "aws_lambda_function" "aws_sg" {
-  function_name    = "aws_sg"
+  function_name    = "aws_sg_test"
   filename         = data.archive_file.SG_monitoring_lambdascript.output_path
   handler          = "lambda_function.lambda_handler"
   package_type     = "Zip"
@@ -154,11 +171,9 @@ resource "aws_lambda_function" "aws_sg" {
     mode = "PassThrough"
   }
 
-
-
   environment {
     variables = {
-      snsarn = "${aws_sns_topic.aws_sg_sns.arn}"
+      SNSARN = "${aws_sns_topic.aws_sg_sns.arn}"
     }
   }
 }
@@ -193,7 +208,6 @@ POLICY
   managed_policy_arns = [aws_iam_policy.LambdaExecutionRole.arn, aws_iam_policy.AmazonEC2FullAccess.arn]
 
   name = "aws_sg-role"
-  path = "/service-role/"
 
   tags = {
     sg = "true"
@@ -209,7 +223,6 @@ POLICY
 resource "aws_iam_policy" "LambdaExecutionRole" {
 
   name = "AWSLambdaBasicExecutionRole_for_SG"
-  path = "/service-role/"
   policy = jsonencode(
     {
       Statement = [
@@ -225,7 +238,7 @@ resource "aws_iam_policy" "LambdaExecutionRole" {
           ]
           Effect = "Allow"
           Resource = [
-            aws_cloudwatch_log_group.aws_sg_log.arn, // logs arn
+            "*" 
           ]
         },
       ]
